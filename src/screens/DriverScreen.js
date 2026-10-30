@@ -13,6 +13,7 @@ import {
   Alert,
   RefreshControl,
   Modal,
+  Linking,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
@@ -21,6 +22,18 @@ import LinearGradient from 'react-native-linear-gradient';
 // ✅ Centralized API
 // ============================================
 import { apiGet, apiDelete, ENDPOINTS } from '../utils/Api';
+
+const STATUS_COLORS = {
+  Assigned: '#4CAF50',
+  Unassigned: '#94A3B8',
+};
+
+const formatDate = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+};
 
 const DriverScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');
@@ -39,7 +52,6 @@ const DriverScreen = ({ navigation }) => {
   }, []);
 
   // Re-fetch every time this screen comes back into focus
-  // (covers the case where AddDriverScreen added or edited a driver)
   useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => {
       fetchDrivers();
@@ -48,17 +60,20 @@ const DriverScreen = ({ navigation }) => {
   }, [navigation]);
 
   // ============================================
-  // Fetch drivers
+  // Fetch drivers  →  GET /api/driver/assignment
+  // Response: { success, count, assignedCount, unassignedCount, data: [...] }
   // ============================================
   const fetchDrivers = async () => {
     try {
       setLoading(true);
       setError(null);
 
-      const data = await apiGet(ENDPOINTS.DRIVERS);
+      const res = await apiGet(ENDPOINTS.DRIVERS_ASSIGNMENT);
 
-      console.log('✅ Drivers fetched successfully:', data);
-      setDrivers(transformDriverData(data));
+      const driverList = Array.isArray(res) ? res : (res?.data || []);
+
+      console.log('✅ Drivers (with assignment) fetched:', driverList.length);
+      setDrivers(transformDriverData(driverList));
     } catch (err) {
       console.error('❌ Error fetching drivers:', err);
       setError(err.message);
@@ -79,25 +94,35 @@ const DriverScreen = ({ navigation }) => {
 
   // ============================================
   // Transform API data → app format
+  // ✅ API now sends lowercase keys (vehicleRegnNumber, assignmentFromDate, ...)
+  //    Old capitalized keys are kept as a fallback.
   // ============================================
   const transformDriverData = (apiDrivers) => {
-    const statuses = ['Active', 'Offline'];
-    const statusColors = { Active: '#4CAF50', Offline: '#94A3B8' };
+    return apiDrivers.map((d) => {
+      const isAssigned = d.assignmentStatus === 'ACTIVE';
+      const status = isAssigned ? 'Assigned' : 'Unassigned';
 
-    return apiDrivers.map((driver) => {
-      const randomStatus = statuses[Math.floor(Math.random() * statuses.length)];
+      const regNo = d.vehicleRegnNumber || d.VehicleRegnNumber;
+      const hasVehicle = !!regNo;
+      const vehicleModelText = [d.vehicleMake, d.vehicleModel].filter(Boolean).join(' ');
 
       return {
-        id: driver._id,
-        name: driver.driver_name || 'Unknown Driver',
-        phone: driver.mobile_number || 'N/A',
-        userId: driver.user_id || 'N/A',
-        email: driver.email_id || 'N/A',
-        createdAt: driver.created_at || '',
-        vehicle: 'Not Assigned',
-        status: randomStatus,
-        statusColor: statusColors[randomStatus],
-        originalData: driver,   // ← keep raw API object for editing
+        id: d.driverId,
+        name: d.driverName || 'Unknown Driver',
+        phone: d.driverMobile || 'N/A',
+        email: d.driverEmail || 'N/A',
+        licenseNo: d.driverLicense || 'N/A',
+        licenseType: d.driverLicenseType || 'N/A',
+        rating: d.driverRating,
+        status,
+        statusColor: STATUS_COLORS[status],
+        vehicle: hasVehicle ? regNo : 'Not Assigned',
+        vehicleModel: vehicleModelText,
+        vehicleId: d.vehicleId || null,
+        tripId: d.assignmentTripId || null,
+        fromDate: formatDate(d.assignmentFromDate || d.AssignmentFromDate),
+        toDate: formatDate(d.assignmentToDate || d.AssignmentToDate),
+        originalData: d,
       };
     });
   };
@@ -111,42 +136,62 @@ const DriverScreen = ({ navigation }) => {
   };
 
   // ============================================
+  // Edit
+  // ============================================
+  const handleEditDriver = async (driver) => {
+    try {
+      const res = await apiGet(ENDPOINTS.DRIVER_BY_ID(driver.id));
+      const full = res?.driver || res?.data || res;
+      navigation.navigate('AddDriver', { editDriver: full });
+    } catch (err) {
+      console.error('❌ Error loading driver for edit:', err);
+      Alert.alert('Error', `Could not load driver details.\n\nError: ${err.message}`);
+    }
+  };
+
+  // ============================================
+  // Leave & Assignment info icon → DriverLeave screen
+  // (that screen calls: GET /api/driver/:id,
+  //  GET /api/driverassignments/bydriver/:id, GET /api/driverleaves/driver/:id)
+  // ============================================
+  const handleLeaveInfo = (driver) => {
+    navigation.navigate('DriverLeave', {
+      driverId: driver.id,
+      driver: {
+        id: driver.id,
+        name: driver.name,
+        phone: driver.phone,
+        email: driver.email,
+        licenseNo: driver.licenseNo,
+        licenseType: driver.licenseType,
+        rating: driver.rating,
+      },
+    });
+  };
+
+  // ============================================
   // Delete driver with confirmation
   // ============================================
   const handleDeleteDriver = (driver) => {
-    setDropdownVisible(false); // close menu first
+    setDropdownVisible(false);
 
     Alert.alert(
       'Delete Driver',
       `Are you sure you want to delete ${driver.name}?`,
       [
-        {
-          text: 'Cancel',
-          style: 'cancel',
-          onPress: () => console.log('Delete cancelled'),
-        },
+        { text: 'Cancel', style: 'cancel' },
         {
           text: 'Yes',
           style: 'destructive',
           onPress: async () => {
             try {
               console.log('🗑️  Deleting driver:', driver.id);
-
               await apiDelete(`${ENDPOINTS.DRIVERS}/${driver.id}`);
-
-              console.log('✅ Driver deleted successfully');
-
               Alert.alert('Success', 'Driver deleted successfully!');
-
-              // Refresh the list
               fetchDrivers();
             } catch (err) {
               console.error('❌ Error deleting driver:', err);
-              Alert.alert(
-                'Error',
-                `Failed to delete driver.\n\nError: ${err.message}`,
-                [{ text: 'OK' }]
-              );
+              Alert.alert('Error', `Failed to delete driver.\n\nError: ${err.message}`, [{ text: 'OK' }]);
             }
           },
         },
@@ -172,7 +217,8 @@ const DriverScreen = ({ navigation }) => {
           d.name.toLowerCase().includes(q) ||
           d.phone.includes(q) ||
           d.vehicle.toLowerCase().includes(q) ||
-          d.email.toLowerCase().includes(q)
+          d.email.toLowerCase().includes(q) ||
+          d.licenseNo.toLowerCase().includes(q)
       );
     }
 
@@ -182,11 +228,11 @@ const DriverScreen = ({ navigation }) => {
   // ============================================
   // Counts
   // ============================================
-  const activeCount = drivers.filter((d) => d.status === 'Active').length;
-  const offlineCount = drivers.filter((d) => d.status === 'Offline').length;
+  const assignedCount = drivers.filter((d) => d.status === 'Assigned').length;
+  const unassignedCount = drivers.filter((d) => d.status === 'Unassigned').length;
 
   // ============================================
-  // Driver Card with three-dot menu
+  // Driver Card
   // ============================================
   const DriverCard = ({ driver }) => {
     const handleMenuPress = (event) => {
@@ -196,20 +242,57 @@ const DriverScreen = ({ navigation }) => {
       setDropdownVisible(true);
     };
 
+    const handleCall = () => {
+      if (driver.phone && driver.phone !== 'N/A') Linking.openURL(`tel:${driver.phone}`);
+    };
+
+    const handleMessage = () => {
+      if (driver.phone && driver.phone !== 'N/A') Linking.openURL(`sms:${driver.phone}`);
+    };
+
+    // History -> DriverAssignmentHistory screen
+    // (calls GET /api/driverassignments/bydriver/:id, same as DriverLeaveScreen)
+    const handleHistory = () => {
+      navigation.navigate('DriverAssignmentHistory', {
+        driverId: driver.id,
+        driver: {
+          id: driver.id,
+          name: driver.name,
+          phone: driver.phone,
+        },
+      });
+    };
+
     return (
-      <View style={styles.driverCard}>
-        {/* ── three-dot menu button (top-right corner) ── */}
+      <TouchableOpacity
+        style={styles.driverCard}
+        activeOpacity={0.9}
+        onPress={() =>
+          navigation.navigate('DriverDetail', {
+            driverId: driver.id,
+            assignment: driver,
+          })
+        }
+      >
+        {/* Driver Leave & Assignment Info icon */}
         <TouchableOpacity
-          style={styles.menuButton}
+          style={styles.leaveButton}
           activeOpacity={0.6}
-          onPress={handleMenuPress}
+          onPress={() => handleLeaveInfo(driver)}
         >
+          <View style={styles.menuButtonInner}>
+            <Icon name="information-outline" size={20} color="#F59E0B" />
+          </View>
+        </TouchableOpacity>
+
+        {/* three-dot menu */}
+        <TouchableOpacity style={styles.menuButton} activeOpacity={0.6} onPress={handleMenuPress}>
           <View style={styles.menuButtonInner}>
             <Icon name="dots-vertical" size={20} color="#3477eb" />
           </View>
         </TouchableOpacity>
 
-        {/* Header with avatar, name, phone, and status */}
+        {/* Header */}
         <View style={styles.driverHeader}>
           <View style={styles.avatarContainer}>
             <View style={styles.avatar}>
@@ -219,7 +302,6 @@ const DriverScreen = ({ navigation }) => {
           </View>
 
           <View style={styles.driverInfo}>
-            {/* Name and Status Badge Row */}
             <View style={styles.nameStatusRow}>
               <Text style={styles.driverName} numberOfLines={1}>{driver.name}</Text>
               <View style={[styles.statusBadge, { backgroundColor: driver.statusColor }]}>
@@ -227,7 +309,6 @@ const DriverScreen = ({ navigation }) => {
               </View>
             </View>
 
-            {/* Phone Row */}
             <View style={styles.infoRow}>
               <Icon name="phone" size={14} color="#64748B" />
               <Text style={styles.phoneText}>{driver.phone}</Text>
@@ -240,38 +321,63 @@ const DriverScreen = ({ navigation }) => {
         {/* Details */}
         <View style={styles.driverDetails}>
           <View style={styles.detailItem}>
-            <Icon name="identifier" size={16} color="#64748B" />
-            <Text style={styles.detailLabel}>User ID</Text>
-            <Text style={styles.detailValue}>{driver.userId}</Text>
+            <Icon name="card-account-details-outline" size={16} color="#64748B" />
+            <Text style={styles.detailLabel}>License</Text>
+            <Text style={styles.detailValue} numberOfLines={1}>
+              {driver.licenseNo} ({driver.licenseType})
+            </Text>
           </View>
+
           <View style={styles.detailItem}>
             <Icon name="car-side" size={16} color="#64748B" />
             <Text style={styles.detailLabel}>Vehicle</Text>
-            <Text style={styles.detailValue}>{driver.vehicle}</Text>
+            <Text style={styles.detailValue} numberOfLines={1}>
+              {driver.vehicle}
+              {driver.vehicleModel ? `  •  ${driver.vehicleModel}` : ''}
+            </Text>
           </View>
+
           <View style={styles.detailItem}>
             <Icon name="email-outline" size={16} color="#64748B" />
             <Text style={styles.detailLabel}>Email</Text>
             <Text style={styles.detailValue} numberOfLines={1}>{driver.email}</Text>
           </View>
+
+          {driver.fromDate !== '' && (
+            <View style={styles.detailItem}>
+              <Icon name="calendar-range" size={16} color="#64748B" />
+              <Text style={styles.detailLabel}>Period</Text>
+              <Text style={styles.detailValue} numberOfLines={1}>
+                {driver.fromDate}{driver.toDate ? `  →  ${driver.toDate}` : ''}
+              </Text>
+            </View>
+          )}
+
+          {driver.rating !== null && driver.rating !== undefined && (
+            <View style={styles.detailItem}>
+              <Icon name="star" size={16} color="#F59E0B" />
+              <Text style={styles.detailLabel}>Rating</Text>
+              <Text style={styles.detailValue}>{driver.rating}</Text>
+            </View>
+          )}
         </View>
 
         {/* Actions */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleCall}>
             <Icon name="phone" size={18} color="#3477eb" />
             <Text style={styles.actionButtonText}>Call</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleMessage}>
             <Icon name="message-outline" size={18} color="#3477eb" />
             <Text style={styles.actionButtonText}>Message</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.actionButton}>
+          <TouchableOpacity style={styles.actionButton} onPress={handleHistory} activeOpacity={0.7}>
             <Icon name="history" size={18} color="#3477eb" />
             <Text style={styles.actionButtonText}>History</Text>
           </TouchableOpacity>
         </View>
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -284,7 +390,7 @@ const DriverScreen = ({ navigation }) => {
         <StatusBar barStyle="light-content" backgroundColor="#3477eb" />
         <LinearGradient colors={['#3477eb', '#5a94f5']} style={styles.header}>
           <View style={styles.headerContent}>
-            <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.menuButton}>
+            <TouchableOpacity onPress={() => navigation.openDrawer()} style={styles.menuButtonTop}>
               <Icon name="menu" size={28} color="#FFFFFF" />
             </TouchableOpacity>
             <View style={styles.headerCenter}>
@@ -305,12 +411,12 @@ const DriverScreen = ({ navigation }) => {
   }
 
   // ============================================
-  // Three Dot Menu Modal (like KnowYourLeader)
+  // Three Dot Menu Modal
   // ============================================
   const ThreeDotMenu = () => {
     if (!dropdownVisible || !currentDriverId) return null;
 
-    const currentDriver = drivers.find(d => d.id === currentDriverId);
+    const currentDriver = drivers.find((d) => d.id === currentDriverId);
     if (!currentDriver) return null;
 
     return (
@@ -325,18 +431,12 @@ const DriverScreen = ({ navigation }) => {
           activeOpacity={1}
           onPress={() => setDropdownVisible(false)}
         >
-          <View style={[styles.dropdownMenu, {
-            top: dropdownPosition.y,
-            left: dropdownPosition.x,
-          }]}>
+          <View style={[styles.dropdownMenu, { top: dropdownPosition.y, left: dropdownPosition.x }]}>
             <TouchableOpacity
               style={styles.dropdownItem}
               onPress={() => {
-                console.log('✏️  Edit pressed for driver:', currentDriver.id, currentDriver.name);
                 setDropdownVisible(false);
-                setTimeout(() => {
-                  navigation.navigate('AddDriver', { editDriver: currentDriver.originalData });
-                }, 100);
+                setTimeout(() => handleEditDriver(currentDriver), 100);
               }}
               activeOpacity={0.7}
             >
@@ -349,7 +449,6 @@ const DriverScreen = ({ navigation }) => {
             <TouchableOpacity
               style={[styles.dropdownItem, styles.dropdownDeleteItem]}
               onPress={() => {
-                console.log('🗑️  Delete clicked for driver:', currentDriver.id, currentDriver.name);
                 setDropdownVisible(false);
                 handleDeleteDriver(currentDriver);
               }}
@@ -371,7 +470,6 @@ const DriverScreen = ({ navigation }) => {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#3477eb" />
 
-      {/* Three Dot Menu Modal */}
       <ThreeDotMenu />
 
       {/* Header */}
@@ -383,7 +481,6 @@ const DriverScreen = ({ navigation }) => {
           <View style={styles.headerCenter}>
             <Text style={styles.headerTitle}>Drivers</Text>
           </View>
-          {/* Account Multiple Plus Icon → AddDriver */}
           <TouchableOpacity style={styles.addButton} onPress={() => navigation.navigate('AddDriver')}>
             <Icon name="account-multiple-plus" size={28} color="#FFFFFF" />
           </TouchableOpacity>
@@ -418,13 +515,13 @@ const DriverScreen = ({ navigation }) => {
         <View style={styles.statsContainer}>
           <View style={styles.statCard}>
             <Icon name="account-check" size={24} color="#4CAF50" />
-            <Text style={styles.statValue}>{activeCount}</Text>
-            <Text style={styles.statLabel}>Active</Text>
+            <Text style={styles.statValue}>{assignedCount}</Text>
+            <Text style={styles.statLabel}>Assigned</Text>
           </View>
           <View style={styles.statCard}>
             <Icon name="account-off" size={24} color="#94A3B8" />
-            <Text style={styles.statValue}>{offlineCount}</Text>
-            <Text style={styles.statLabel}>Offline</Text>
+            <Text style={styles.statValue}>{unassignedCount}</Text>
+            <Text style={styles.statLabel}>Unassigned</Text>
           </View>
           <View style={styles.statCard}>
             <Icon name="account-group" size={24} color="#3477eb" />
@@ -436,8 +533,9 @@ const DriverScreen = ({ navigation }) => {
         {/* Filter tabs */}
         <View style={styles.filterSection}>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.filterContainer}>
-            {['All', 'Active', 'Offline'].map((filter) => {
-              const count = filter === 'All' ? drivers.length : filter === 'Active' ? activeCount : offlineCount;
+            {['All', 'Assigned', 'Unassigned'].map((filter) => {
+              const count =
+                filter === 'All' ? drivers.length : filter === 'Assigned' ? assignedCount : unassignedCount;
               const isActive = selectedFilter === filter;
 
               return (
@@ -503,7 +601,7 @@ const styles = StyleSheet.create({
   headerCenter: { flex: 1, marginLeft: 16 },
   headerTitle: { fontSize: 24, fontWeight: '700', color: '#FFFFFF' },
   addButton: { width: 40, height: 40, justifyContent: 'center', alignItems: 'center' },
-  
+
   searchContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 3, borderWidth: 2, borderColor: 'rgba(255,255,255,0.4)' },
   searchInput: { flex: 1, marginLeft: 8, fontSize: 15, color: '#FFFFFF', fontWeight: '500' },
   scrollView: { flex: 1 },
@@ -530,7 +628,8 @@ const styles = StyleSheet.create({
   avatarContainer: { position: 'relative', marginRight: 14 },
   avatar: { width: 56, height: 56, borderRadius: 28, backgroundColor: '#3477eb', justifyContent: 'center', alignItems: 'center' },
   statusIndicator: { width: 16, height: 16, borderRadius: 8, position: 'absolute', bottom: 0, right: 0, borderWidth: 3, borderColor: '#FFFFFF' },
-  driverInfo: { flex: 1, paddingRight: 40 },
+  // paddingRight increased so name/status don't overlap the two icons (leave + menu)
+  driverInfo: { flex: 1, paddingRight: 80 },
   nameStatusRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6, gap: 8 },
   driverName: { fontSize: 17, fontWeight: '700', color: '#1E293B', flex: 1 },
   infoRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -542,7 +641,7 @@ const styles = StyleSheet.create({
 
   driverDetails: { gap: 10, marginBottom: 16 },
   detailItem: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  detailLabel: { fontSize: 13, color: '#64748B', fontWeight: '500', width: 70 },
+  detailLabel: { fontSize: 13, color: '#64748B', fontWeight: '500', width: 60 },
   detailValue: { fontSize: 13, color: '#1E293B', fontWeight: '600', flex: 1 },
 
   actionButtons: { flexDirection: 'row', gap: 10 },
@@ -550,6 +649,7 @@ const styles = StyleSheet.create({
   actionButtonText: { fontSize: 13, color: '#3477eb', fontWeight: '700' },
 
   menuButton: { position: 'absolute', top: 16, right: 16, zIndex: 1000 },
+  leaveButton: { position: 'absolute', top: 16, right: 54, zIndex: 1000 },
   menuButtonInner: { width: 32, height: 32, borderRadius: 16, backgroundColor: '#F0F7FF', borderWidth: 1, borderColor: '#DBEAFE', justifyContent: 'center', alignItems: 'center' },
 
   dropdownOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.3)' },

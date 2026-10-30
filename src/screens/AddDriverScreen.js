@@ -17,6 +17,14 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
 
 import { apiPost, apiPut, ENDPOINTS } from '../utils/Api';
+import {
+  scale,
+  verticalScale,
+  moderateScale,
+  normalizeFont,
+  isSmallDevice,
+  isTablet,
+} from '../utils/responsive';
 
 const LICENSE_TYPES = ['LMV', 'HMV', 'HPMV', 'MGV', 'TRANS', 'PSV'];
 
@@ -28,6 +36,7 @@ const AddDriverScreen = ({ navigation, route }) => {
     driver_name:          isEditMode ? (editDriver.driver_name          || '') : '',
     mobile_number:        isEditMode ? (editDriver.mobile_number        || '') : '',
     email_id:             isEditMode ? (editDriver.email_id             || '') : '',
+    password:             '',
     license_number:       isEditMode ? (editDriver.license_number       || '') : '',
     license_type:         isEditMode ? (editDriver.license_type         || '') : '',
   });
@@ -35,6 +44,7 @@ const AddDriverScreen = ({ navigation, route }) => {
   const [loading,          setLoading]          = useState(false);
   const [errors,           setErrors]           = useState({});
   const [showLicenseTypes, setShowLicenseTypes] = useState(false);
+  const [showPassword,     setShowPassword]     = useState(false);
 
   useEffect(() => {
     if (editDriver) {
@@ -42,6 +52,7 @@ const AddDriverScreen = ({ navigation, route }) => {
         driver_name:    editDriver.driver_name    || '',
         mobile_number:  editDriver.mobile_number  || '',
         email_id:       editDriver.email_id       || '',
+        password:       '',
         license_number: editDriver.license_number || '',
         license_type:   editDriver.license_type   || '',
       });
@@ -71,6 +82,16 @@ const AddDriverScreen = ({ navigation, route }) => {
     else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(formData.email_id))
       newErrors.email_id = 'Please enter a valid email address';
 
+    // Password required when adding a new driver; optional on edit (leave blank to keep existing)
+    if (!isEditMode) {
+      if (!formData.password.trim())
+        newErrors.password = 'Password is required';
+      else if (formData.password.trim().length < 6)
+        newErrors.password = 'Password must be at least 6 characters';
+    } else if (formData.password.trim() && formData.password.trim().length < 6) {
+      newErrors.password = 'Password must be at least 6 characters';
+    }
+
     if (!formData.license_number.trim())
       newErrors.license_number = 'License number is required';
 
@@ -90,17 +111,46 @@ const AddDriverScreen = ({ navigation, route }) => {
     try {
       setLoading(true);
 
+      // Build payload — map local field names to what the backend schema expects
+      const { license_number, ...rest } = formData;
+      const payload = {
+        ...rest,
+        driver_license: license_number, // backend requires `driver_license`, not `license_number`
+      };
+      if (isEditMode && !payload.password.trim()) {
+        delete payload.password;
+      }
+
       if (isEditMode) {
-        await apiPut(`${ENDPOINTS.DRIVERS}/${editDriver._id}`, formData);
+        const updated = await apiPut(`${ENDPOINTS.DRIVERS}/${editDriver._id}`, payload);
+        console.log('✏️ Updated driver response:', JSON.stringify(updated));
         Alert.alert('Success', 'Driver updated successfully!', [
-          { text: 'OK', onPress: () => navigation.goBack() },
+          {
+            text: 'OK',
+            onPress: () => {
+              // Force-refresh the list on the previous screen, regardless of
+              // whether the focus listener fires (handles nested navigators/tabs).
+              route?.params?.onSuccess?.();
+              navigation.goBack();
+            },
+          },
         ]);
       } else {
-        await apiPost(ENDPOINTS.DRIVERS, formData);
+        const created = await apiPost(ENDPOINTS.DRIVERS, payload);
+        console.log('🆕 Created driver response:', JSON.stringify(created));
         Alert.alert('Success', 'Driver added successfully!', [
-          { text: 'OK', onPress: () => navigation.goBack() },
+          {
+            text: 'OK',
+            onPress: () => {
+              route?.params?.onSuccess?.();
+              navigation.goBack();
+            },
+          },
         ]);
-        setFormData({ driver_name: '', mobile_number: '', email_id: '', license_number: '', license_type: '' });
+        setFormData({
+          driver_name: '', mobile_number: '', email_id: '', password: '',
+          license_number: '', license_type: '',
+        });
       }
     } catch (err) {
       Alert.alert(
@@ -271,6 +321,37 @@ const AddDriverScreen = ({ navigation, route }) => {
                 />
               </View>
               {errors.email_id ? <Text style={styles.errorText}>{errors.email_id}</Text> : null}
+            </View>
+
+            {/* ── Password ── */}
+            <View style={styles.inputGroup}>
+              <Text style={styles.label}>
+                Password {isEditMode ? '(leave blank to keep unchanged)' : '*'}
+              </Text>
+              <View style={[styles.inputWrapper, errors.password && styles.inputError]}>
+                <Icon name="lock" size={20} color="#64748B" style={styles.inputIcon} />
+                <TextInput
+                  style={styles.input}
+                  placeholder={isEditMode ? 'Enter new password' : 'Enter password'}
+                  placeholderTextColor="#94A3B8"
+                  value={formData.password}
+                  onChangeText={(t) => updateField('password', t)}
+                  secureTextEntry={!showPassword}
+                  autoCapitalize="none"
+                  editable={!loading}
+                />
+                <TouchableOpacity
+                  onPress={() => setShowPassword((v) => !v)}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                >
+                  <Icon
+                    name={showPassword ? 'eye-off' : 'eye'}
+                    size={20}
+                    color="#64748B"
+                  />
+                </TouchableOpacity>
+              </View>
+              {errors.password ? <Text style={styles.errorText}>{errors.password}</Text> : null}
             </View>
 
             {/* Info box */}

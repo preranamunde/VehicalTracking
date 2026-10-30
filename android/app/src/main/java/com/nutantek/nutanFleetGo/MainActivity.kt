@@ -1,4 +1,4 @@
-package com.vehicaltracking
+package com.nutantek.nutanFleetGo
 
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate

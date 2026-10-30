@@ -9,6 +9,14 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
+import {
+  scale,
+  verticalScale,
+  moderateScale,
+  normalizeFont,
+  isSmallDevice,
+  isTablet,
+} from '../utils/responsive';
 
 const HelpScreen = ({ navigation }) => {
   const [searchQuery, setSearchQuery] = useState('');

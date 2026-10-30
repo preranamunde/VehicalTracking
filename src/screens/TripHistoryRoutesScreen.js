@@ -8,6 +8,14 @@ import {
   ScrollView,
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
+import {
+  scale,
+  verticalScale,
+  moderateScale,
+  normalizeFont,
+  isSmallDevice,
+  isTablet,
+} from '../utils/responsive';
 
 const TripHistoryRoutesScreen = ({ navigation }) => {
   const routes = [

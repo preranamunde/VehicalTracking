@@ -1,28 +1,45 @@
 import React from 'react';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, StyleSheet, Platform } from 'react-native';
+import { View, StyleSheet, Platform, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import VehicleScreen from '../screens/VehicleScreen';
 import RouteManagementScreen from '../screens/RouteManagementScreen';
 import DriverScreen from '../screens/DriverScreen';
+import { scale, moderateScale, moderateVerticalScale, normalizeFont } from '../utils/responsive';
 
 const Tab = createBottomTabNavigator();
 
+// Small helper to keep scaled values from blowing up on tall/tablet
+// screens or shrinking too far on tiny screens.
+const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+
 const BottomTabNavigator = () => {
   const insets = useSafeAreaInsets();
+  // Not used directly here, but keeping the hook means this component
+  // re-renders (and re-measures insets/orientation) on rotation.
+  useWindowDimensions();
 
-  const tabBarHeight = Platform.select({
-    ios: 80 + insets.bottom,
-    android: 99,
-    default: 95,
+  // Content height (excludes safe-area inset) - clamped so it doesn't
+  // grow/shrink out of control on unusual screen sizes.
+  const baseContentHeight = Platform.select({
+    ios: clamp(moderateVerticalScale(55), 50, 65),
+    android: clamp(moderateVerticalScale(65), 58, 78),
+    default: clamp(moderateVerticalScale(62), 55, 74),
   });
+
+  const tabBarHeight = baseContentHeight + insets.bottom;
+
+  // Small breathing-room padding below the icons/labels, damped
+  // instead of linearly scaled, and clamped to a tight range.
+  const extraBottomPad = clamp(moderateVerticalScale(8), 6, 12);
+  const extraBottomPadAndroid = clamp(moderateVerticalScale(14), 12, 20);
 
   return (
     <Tab.Navigator
       initialRouteName="Vehicle"
       screenOptions={({ route }) => ({
-        tabBarIcon: ({ focused, color, size }) => {
+        tabBarIcon: ({ focused, color }) => {
           let iconName;
           if (route.name === 'Vehicle') {
             iconName = 'car-multiple';
@@ -39,7 +56,7 @@ const BottomTabNavigator = () => {
             ]}>
               <Icon
                 name={iconName}
-                size={focused ? 26 : 24}
+                size={focused ? moderateScale(26) : moderateScale(24)}
                 color={color}
               />
             </View>
@@ -51,7 +68,13 @@ const BottomTabNavigator = () => {
           backgroundColor: '#3477eb',
           borderTopWidth: 0,
           height: tabBarHeight,
-          paddingBottom: Platform.OS === 'ios' ? insets.bottom + 15 : 25,
+          // insets.bottom already accounts for the home-indicator area on
+          // notched/gesture-nav devices, so we only add a small clamped
+          // breathing-room value instead of a raw linear scale.
+          paddingBottom: Platform.OS === 'ios'
+            ? insets.bottom + extraBottomPad
+            : Math.max(insets.bottom, extraBottomPadAndroid),
+          paddingTop: clamp(moderateVerticalScale(8), 6, 10),
           elevation: 12,
           shadowColor: '#000',
           shadowOffset: { width: 0, height: -4 },
@@ -63,13 +86,15 @@ const BottomTabNavigator = () => {
           right: 0,
         },
         tabBarLabelStyle: {
-          fontSize: 12,
+          fontSize: normalizeFont(12),
           fontWeight: '700',
-          marginTop: 6,
-          marginBottom: Platform.OS === 'android' ? 8 : 4,
+          marginTop: clamp(moderateVerticalScale(6), 4, 8),
+          marginBottom: Platform.OS === 'android'
+            ? clamp(moderateVerticalScale(4), 2, 6)
+            : clamp(moderateVerticalScale(2), 1, 4),
         },
         tabBarItemStyle: {
-          paddingVertical: 6,
+          paddingVertical: clamp(moderateVerticalScale(6), 4, 8),
         },
         headerShown: false,
       })}
@@ -95,9 +120,9 @@ const BottomTabNavigator = () => {
 
 const styles = StyleSheet.create({
   iconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: scale(48),
+    height: scale(48),
+    borderRadius: scale(24),
     justifyContent: 'center',
     alignItems: 'center',
     backgroundColor: 'transparent',

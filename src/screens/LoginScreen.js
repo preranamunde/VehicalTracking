@@ -1,3 +1,6 @@
+// ============================================
+// src/screens/LoginScreen.js
+// ============================================
 import React, { useState } from 'react';
 import {
   View,
@@ -17,6 +20,15 @@ import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Feather from 'react-native-vector-icons/Feather';
 import LinearGradient from 'react-native-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { apiPost, ENDPOINTS } from '../utils/Api';
+import {
+  scale,
+  verticalScale,
+  moderateScale,
+  normalizeFont,
+  isSmallDevice,
+  isTablet,
+} from '../utils/responsive';
 
 const LoginScreen = ({ navigation }) => {
   const [email, setEmail] = useState('');
@@ -32,7 +44,6 @@ const LoginScreen = ({ navigation }) => {
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
           PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
         ]);
-        console.log('📋 Permission results:', granted);
 
         if (
           granted['android.permission.ACCESS_FINE_LOCATION'] ===
@@ -50,7 +61,7 @@ const LoginScreen = ({ navigation }) => {
           global.hasPreciseLocation = false;
           Alert.alert(
             'Approximate Location',
-            'You granted approximate location. For better tracking accuracy, you can enable precise location in settings.',
+            'You granted approximate location. For better tracking accuracy, enable precise location in settings.',
             [{ text: 'OK' }]
           );
         } else {
@@ -74,8 +85,7 @@ const LoginScreen = ({ navigation }) => {
   };
 
   const handleLogin = async () => {
-    // Validate inputs
-    if (!email || !password) {
+    if (!email.trim() || !password) {
       Alert.alert('Error', 'Please enter email and password');
       return;
     }
@@ -83,28 +93,38 @@ const LoginScreen = ({ navigation }) => {
     setLoading(true);
 
     try {
-      console.log('🔐 Bypassing API — mock login...');
+      console.log('🔐 Calling real login API...');
 
-      // ✅ Mock tokens (no API call)
-      const accessToken = 'mock_access_token';
-      const refreshToken = 'mock_refresh_token';
+      // ✅ useAuth = false → no token needed for login call
+      const data = await apiPost(
+        ENDPOINTS.LOGIN,
+        { email: email.trim(), password },
+        false
+      );
 
-      // Store mock tokens in AsyncStorage
-      await AsyncStorage.setItem('accessToken', accessToken);
-      await AsyncStorage.setItem('refreshToken', refreshToken);
+      console.log('📦 Login response:', JSON.stringify(data));
+
+      if (!data.accessToken) {
+        throw new Error('No access token received from server');
+      }
+
+      // ✅ Store real tokens from server
+      await AsyncStorage.setItem('accessToken', data.accessToken);
+      await AsyncStorage.setItem('refreshToken', data.refreshToken || '');
       await AsyncStorage.setItem('userEmail', email.trim());
 
-      console.log('💾 Mock tokens stored successfully');
+      console.log('💾 accessToken stored:', data.accessToken.substring(0, 30) + '...');
+      console.log('💾 refreshToken stored:', data.refreshToken ? 'YES' : 'NO');
 
-      // Request location permissions
       await requestLocationPermissions();
 
       setLoading(false);
       navigation.navigate('Home');
+
     } catch (error) {
       setLoading(false);
       console.error('❌ Login error:', error.message);
-      Alert.alert('Login Failed', 'Something went wrong. Please try again.');
+      Alert.alert('Login Failed', error.message || 'Something went wrong. Please try again.');
     }
   };
 
@@ -115,33 +135,23 @@ const LoginScreen = ({ navigation }) => {
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={styles.keyboardView}
       >
-        {/* Header with Gradient */}
-        <LinearGradient
-          colors={['#3477eb', '#1a56cc']}
-          style={styles.header}
-        >
+        {/* Header */}
+        <LinearGradient colors={['#3477eb', '#1a56cc']} style={styles.header}>
           <View style={styles.logoContainer}>
             <Icon name="car-connected" size={40} color="#FFFFFF" />
           </View>
-          <Text style={styles.title}>Vehicle Tracker</Text>
+          <Text style={styles.title}>nutanFleetGo</Text>
           <Text style={styles.subtitle}>Monitor your fleet anywhere</Text>
         </LinearGradient>
 
-        {/* Login Form */}
+        {/* Form */}
         <View style={styles.formContainer}>
           <Text style={styles.welcomeText}>Sign In</Text>
-          <Text style={styles.welcomeSubtext}>
-            Enter your credentials to continue
-          </Text>
+          <Text style={styles.welcomeSubtext}>Enter your credentials to continue</Text>
 
-          {/* Email Input */}
+          {/* Email */}
           <View style={styles.inputContainer}>
-            <Feather
-              name="mail"
-              size={20}
-              color="#94A3B8"
-              style={styles.inputIcon}
-            />
+            <Feather name="mail" size={20} color="#94A3B8" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Email Address"
@@ -150,18 +160,14 @@ const LoginScreen = ({ navigation }) => {
               onChangeText={setEmail}
               keyboardType="email-address"
               autoCapitalize="none"
+              autoCorrect={false}
               editable={!loading}
             />
           </View>
 
-          {/* Password Input */}
+          {/* Password */}
           <View style={styles.inputContainer}>
-            <Feather
-              name="lock"
-              size={20}
-              color="#94A3B8"
-              style={styles.inputIcon}
-            />
+            <Feather name="lock" size={20} color="#94A3B8" style={styles.inputIcon} />
             <TextInput
               style={styles.input}
               placeholder="Password"
@@ -169,6 +175,10 @@ const LoginScreen = ({ navigation }) => {
               value={password}
               onChangeText={setPassword}
               secureTextEntry={!showPassword}
+              // ✅ First letter will NOT auto-capitalize (starts in small letter by default)
+              autoCapitalize="none"
+              autoCorrect={false}
+              spellCheck={false}
               editable={!loading}
             />
             <TouchableOpacity
@@ -176,11 +186,7 @@ const LoginScreen = ({ navigation }) => {
               style={styles.eyeIcon}
               disabled={loading}
             >
-              <Feather
-                name={showPassword ? 'eye' : 'eye-off'}
-                size={20}
-                color="#94A3B8"
-              />
+              <Feather name={showPassword ? 'eye' : 'eye-off'} size={20} color="#94A3B8" />
             </TouchableOpacity>
           </View>
 
@@ -195,27 +201,19 @@ const LoginScreen = ({ navigation }) => {
             onPress={handleLogin}
             disabled={loading}
           >
-            <LinearGradient
-              colors={['#3477eb', '#1a56cc']}
-              style={styles.loginButtonGradient}
-            >
+            <LinearGradient colors={['#3477eb', '#1a56cc']} style={styles.loginButtonGradient}>
               {loading ? (
                 <ActivityIndicator color="#FFFFFF" size="small" />
               ) : (
                 <>
                   <Text style={styles.loginButtonText}>Sign In</Text>
-                  <Feather
-                    name="arrow-right"
-                    size={20}
-                    color="#FFFFFF"
-                    style={styles.buttonIcon}
-                  />
+                  <Feather name="arrow-right" size={20} color="#FFFFFF" style={styles.buttonIcon} />
                 </>
               )}
             </LinearGradient>
           </TouchableOpacity>
 
-          {/* Sign Up Link */}
+          {/* Sign Up */}
           <View style={styles.signupContainer}>
             <Text style={styles.signupText}>Don't have an account? </Text>
             <TouchableOpacity onPress={() => navigation.navigate('SignUp')}>
@@ -229,131 +227,51 @@ const LoginScreen = ({ navigation }) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#F5F5F5',
-  },
-  keyboardView: {
-    flex: 1,
-  },
+  container:       { flex: 1, backgroundColor: '#F5F5F5' },
+  keyboardView:    { flex: 1 },
   header: {
     paddingTop: Platform.OS === 'ios' ? 60 : 50,
-    paddingBottom: 40,
-    alignItems: 'center',
-    justifyContent: 'center',
+    paddingBottom: 40, alignItems: 'center', justifyContent: 'center',
   },
   logoContainer: {
-    width: 80,
-    height: 80,
-    borderRadius: 40,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
+    width: 80, height: 80, borderRadius: 40,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center', justifyContent: 'center', marginBottom: 16,
   },
-  title: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: '#FFFFFF',
-    marginBottom: 4,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontWeight: '500',
-  },
-  formContainer: {
-    flex: 1,
-    paddingHorizontal: 24,
-    paddingTop: 32,
-  },
-  welcomeText: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#1E293B',
-    marginBottom: 4,
-  },
-  welcomeSubtext: {
-    fontSize: 14,
-    color: '#64748B',
-    marginBottom: 32,
-  },
+  title:           { fontSize: 26, fontWeight: '700', color: '#FFFFFF', marginBottom: 4 },
+  subtitle:        { fontSize: 14, color: 'rgba(255,255,255,0.9)', fontWeight: '500' },
+  formContainer:   { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
+  welcomeText:     { fontSize: 24, fontWeight: '700', color: '#1E293B', marginBottom: 4 },
+  welcomeSubtext:  { fontSize: 14, color: '#64748B', marginBottom: 32 },
   inputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-    height: 56,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.05,
-    shadowRadius: 4,
-    elevation: 2,
+    flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF',
+    borderRadius: 12, paddingHorizontal: 16, marginBottom: 16, height: 56,
+    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05, shadowRadius: 4, elevation: 2,
   },
-  inputIcon: {
-    marginRight: 12,
-  },
-  input: {
-    flex: 1,
-    fontSize: 16,
-    color: '#1E293B',
-  },
-  eyeIcon: {
-    padding: 4,
-  },
-  forgotPassword: {
-    alignSelf: 'flex-end',
-    marginBottom: 24,
-  },
-  forgotPasswordText: {
-    color: '#3477eb',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  inputIcon:       { marginRight: 12 },
+  input:           { flex: 1, fontSize: 16, color: '#1E293B' },
+  eyeIcon:         { padding: 4 },
+  forgotPassword:  { alignSelf: 'flex-end', marginBottom: 24 },
+  forgotPasswordText: { color: '#3477eb', fontSize: 14, fontWeight: '600' },
   loginButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    shadowColor: '#3477eb',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 4,
+    borderRadius: 12, overflow: 'hidden',
+    shadowColor: '#3477eb', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 6, elevation: 4,
   },
-  loginButtonDisabled: {
-    shadowOpacity: 0.1,
-    elevation: 2,
-  },
+  loginButtonDisabled: { shadowOpacity: 0.1, elevation: 2 },
   loginButtonGradient: {
-    flexDirection: 'row',
-    paddingVertical: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
+    flexDirection: 'row', paddingVertical: 16,
+    alignItems: 'center', justifyContent: 'center',
   },
-  loginButtonText: {
-    color: '#FFFFFF',
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  buttonIcon: {
-    marginLeft: 8,
-  },
+  loginButtonText: { color: '#FFFFFF', fontSize: 18, fontWeight: '700' },
+  buttonIcon:      { marginLeft: 8 },
   signupContainer: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginTop: 24,
+    flexDirection: 'row', justifyContent: 'center',
+    alignItems: 'center', marginTop: 24,
   },
-  signupText: {
-    color: '#64748B',
-    fontSize: 15,
-  },
-  signupLink: {
-    color: '#3477eb',
-    fontSize: 15,
-    fontWeight: '700',
-  },
+  signupText:      { color: '#64748B', fontSize: 15 },
+  signupLink:      { color: '#3477eb', fontSize: 15, fontWeight: '700' },
 });
 
 export default LoginScreen;

@@ -12,6 +12,14 @@ import {
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import Feather from 'react-native-vector-icons/Feather';
 import LinearGradient from 'react-native-linear-gradient';
+import {
+  scale,
+  verticalScale,
+  moderateScale,
+  normalizeFont,
+  isSmallDevice,
+  isTablet,
+} from '../utils/responsive';
 
 const HomeScreen = ({ navigation }) => {
   const [selectedFilter, setSelectedFilter] = useState('All');

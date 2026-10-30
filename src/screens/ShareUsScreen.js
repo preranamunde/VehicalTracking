@@ -13,6 +13,14 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
+import {
+  scale,
+  verticalScale,
+  moderateScale,
+  normalizeFont,
+  isSmallDevice,
+  isTablet,
+} from '../utils/responsive';
 
 const ShareUsScreen = ({ navigation }) => {
   const shareLink = 'https://chatgpt.com/c/69861cfd-bb38-8322-869c-4bebb7c90831';

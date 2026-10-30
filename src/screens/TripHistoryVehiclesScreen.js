@@ -12,6 +12,14 @@ import {
 } from 'react-native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import { apiGet, ENDPOINTS } from '../utils/Api';
+import {
+  scale,
+  verticalScale,
+  moderateScale,
+  normalizeFont,
+  isSmallDevice,
+  isTablet,
+} from '../utils/responsive';
 
 const TripHistoryVehiclesScreen = ({ navigation }) => {
   const [vehicles, setVehicles] = useState([]);

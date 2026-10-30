@@ -1,35 +1,63 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  ActivityIndicator,
+  Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { CommonActions } from '@react-navigation/native';
 import Icon from 'react-native-vector-icons/MaterialCommunityIcons';
 import LinearGradient from 'react-native-linear-gradient';
+import { useDrawerStatus } from '@react-navigation/drawer';
+import { apiGet, apiPost, ENDPOINTS, logout as clearSession } from '../utils/Api';
 
 const CustomDrawer = ({ navigation }) => {
   const [expandedItem, setExpandedItem] = useState(null);
+  const [name, setName] = useState('');
+  const [mobile, setMobile] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const drawerStatus = useDrawerStatus(); // 'open' | 'closed'
 
   const menuItems = [
-    { icon: 'view-dashboard', label: 'Dashboard', route: 'HomeScreen' },
-    { icon: 'clipboard-text', label: 'Driver Assignments', route: 'Assignments' },
-    {
-      icon: 'history',
-      label: 'Trip History',
-      hasSubmenu: true,
-      submenu: [
-        { label: 'Vehicles', route: 'TripHistoryVehicles' },
-        { label: 'Routes', route: 'TripHistoryRoutes' },
-      ],
-    },
-    { icon: 'account-multiple-plus', label: 'Refer Us', route: 'ReferUs' },
-    { icon: 'share-variant', label: 'Share Us', route: 'ShareUs' },
-    { icon: 'phone', label: 'Contact Us', route: 'ContactUs' },
-    { icon: 'headset', label: 'Help Desk', route: 'Support' },
-    { icon: 'cog', label: 'Settings', route: 'Settings' },
+    { icon: 'view-dashboard',        label: 'Dashboard',          route: 'HomeScreen' },
+    { icon: 'clipboard-text',        label: 'Driver Assignments', route: 'Assignments' },
+    { icon: 'history',               label: 'Trip History',       route: 'TripHistory' },
+    { icon: 'headset',               label: 'Help Desk',          route: 'Support' },
+    { icon: 'phone',                 label: 'Contact Us',         route: 'ContactUs' },
+    { icon: 'account-multiple-plus', label: 'Refer Us',           route: 'ReferUs' },
+    { icon: 'share-variant',         label: 'Share Us',           route: 'ShareUs' },
+    { icon: 'information-outline',   label: 'About Us',           route: 'AboutUs' },
   ];
+
+  // ── fetch /api/client-auth/me → employee.name & employee.mobile_number ──────
+  const fetchProfile = useCallback(async () => {
+    try {
+      const data = await apiGet(ENDPOINTS.ME);
+      const emp = data?.employee || {};
+      setName(emp.name || '');
+      setMobile(emp.mobile_number || '');
+    } catch (e) {
+      console.log('Drawer profile error:', e.message);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  // first load
+  useEffect(() => {
+    fetchProfile();
+  }, [fetchProfile]);
+
+  // refresh every time the drawer is opened (covers re-login / profile changes)
+  useEffect(() => {
+    if (drawerStatus === 'open') fetchProfile();
+  }, [drawerStatus, fetchProfile]);
 
   const toggleSubmenu = (index) => {
     setExpandedItem(expandedItem === index ? null : index);
@@ -37,6 +65,31 @@ const CustomDrawer = ({ navigation }) => {
 
   const handleNavigation = (route) => {
     navigation.navigate(route);
+  };
+
+  // ── Logout: POST /api/client-auth/logout → clear tokens → back to Login ────
+  const performLogout = async () => {
+    try {
+      setLoggingOut(true);
+      const refreshToken = await AsyncStorage.getItem('refreshToken');
+      await apiPost(ENDPOINTS.LOGOUT, refreshToken ? { refreshToken } : {});
+    } catch (e) {
+      // even if the server call fails (expired token / offline) we still log out locally
+      console.log('Logout API error:', e.message);
+    } finally {
+      await clearSession(); // removes accessToken, refreshToken, userEmail
+      setLoggingOut(false);
+      navigation.dispatch(
+        CommonActions.reset({ index: 0, routes: [{ name: 'Login' }] })
+      );
+    }
+  };
+
+  const handleLogout = () => {
+    Alert.alert('Logout', 'Are you sure you want to logout?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Logout', style: 'destructive', onPress: performLogout },
+    ]);
   };
 
   return (
@@ -52,11 +105,20 @@ const CustomDrawer = ({ navigation }) => {
               <Icon name="account" size={60} color="#3477eb" />
             </View>
           </View>
-          <Text style={styles.profileName}>John Doe</Text>
-          <View style={styles.profileInfoRow}>
-            <Icon name="phone" size={14} color="rgba(255, 255, 255, 0.9)" />
-            <Text style={styles.profilePhone}>+91 98765 43210</Text>
-          </View>
+
+          {loading && !name ? (
+            <ActivityIndicator size="small" color="#FFFFFF" style={styles.loader} />
+          ) : (
+            <>
+              <Text style={styles.profileName} numberOfLines={1}>
+                {name || '-'}
+              </Text>
+              <View style={styles.profileInfoRow}>
+                <Icon name="phone" size={14} color="rgba(255, 255, 255, 0.9)" />
+                <Text style={styles.profilePhone}>{mobile || '-'}</Text>
+              </View>
+            </>
+          )}
         </LinearGradient>
       </TouchableOpacity>
 
@@ -113,6 +175,23 @@ const CustomDrawer = ({ navigation }) => {
         <View style={styles.bottomSpacer} />
       </ScrollView>
 
+      {/* Logout */}
+      <TouchableOpacity
+        style={styles.logoutButton}
+        onPress={handleLogout}
+        activeOpacity={0.8}
+        disabled={loggingOut}
+      >
+        {loggingOut ? (
+          <ActivityIndicator size="small" color="#EF4444" />
+        ) : (
+          <>
+            <Icon name="logout" size={22} color="#EF4444" />
+            <Text style={styles.logoutText}>Logout</Text>
+          </>
+        )}
+      </TouchableOpacity>
+
       {/* App Version */}
       <View style={styles.footer}>
         <Icon name="information-outline" size={14} color="#94A3B8" />
@@ -130,6 +209,7 @@ const styles = StyleSheet.create({
   profileSection: {
     paddingTop: 40,
     paddingBottom: 10,
+    paddingHorizontal: 16,
     alignItems: 'center',
     shadowColor: '#3477eb',
     shadowOffset: { width: 0, height: 4 },
@@ -154,6 +234,9 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.2,
     shadowRadius: 8,
     elevation: 6,
+  },
+  loader: {
+    marginVertical: 14,
   },
   profileName: {
     fontSize: 22,
@@ -231,6 +314,24 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: 20,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    marginHorizontal: 20,
+    marginBottom: 8,
+    paddingVertical: 14,
+    borderRadius: 12,
+    backgroundColor: '#FEF2F2',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+  },
+  logoutText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#EF4444',
   },
   footer: {
     flexDirection: 'row',
